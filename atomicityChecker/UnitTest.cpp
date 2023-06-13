@@ -1,6 +1,8 @@
 #include "pch.h"
 #include <cassert>
+#include <mutex>
 #include <stack>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -13,11 +15,17 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 class AtomicityChecker
 {
 public:
-	AtomicityChecker( void* key, const char* functionName ) :
-		m_key{ reinterpret_cast<long long>(key) }
+	AtomicityChecker(void* key, const char* functionName) :
+		AtomicityChecker{ reinterpret_cast<long long>(key), functionName }
+	{}
+
+	AtomicityChecker(long long key, const char* functionName) :
+		m_key{ key }
 	{
+		std::lock_guard guard{ m_mutex };
+
 		auto it = std::lower_bound(std::begin(m_validator), std::end(m_validator), m_key, [](auto& p, auto instanceAddress) { return p.first < instanceAddress; });
-		if (it == std::cend(m_validator) || it->first != m_key) {
+		if (it == std::end(m_validator) || it->first != m_key) {
 			it = m_validator.insert(it, std::pair(m_key, Threads{}));
 
 			auto& v = it->second.emplace_back();
@@ -45,6 +53,8 @@ public:
 
 	~AtomicityChecker()
 	{
+		std::lock_guard guard{ m_mutex };
+
 		auto it = std::lower_bound(std::begin(m_validator), std::end(m_validator), m_key, [](auto& p, auto key) { return p.first < key; });
 		if (it == std::end(m_validator) || it->first != m_key) {
 			assert(!"implementation error");
@@ -85,7 +95,33 @@ private:
 	static inline std::vector<
 		std::pair<InstanceAddress, Threads>
 	> m_validator;
+
+	static inline std::mutex m_mutex;
 };
+
+#define ATOMICITY_CHECKER_FUNC auto _ = AtomicityChecker(__FUNCTION__, __FUNCTION__)
+
+
+void goo()
+{
+	ATOMICITY_CHECKER_FUNC;
+}
+
+
+void foo()
+{
+	for (auto i = 0; i < 100; ++i) {
+		goo();
+	}
+}
+
+
+void bar()
+{
+	for (auto i = 0; i < 100; ++i) {
+		goo();
+	}
+}
 
 
 namespace UnitTest
@@ -94,21 +130,11 @@ namespace UnitTest
 	{
 		TEST_METHOD(TestMethod1)
 		{
-			auto _ = AtomicityChecker(this, __FUNCTION__);
+			auto t0 = std::thread(foo);
+			auto t1 = std::thread(bar);
 
-			foo();
-		}
-
-		void foo()
-		{
-			auto _ = AtomicityChecker(this, __FUNCTION__);
-
-			bar();
-		}
-
-		void bar()
-		{
-			auto _ = AtomicityChecker(this, __FUNCTION__);
+			t0.join();
+			t1.join();
 		}
 	};
 }
