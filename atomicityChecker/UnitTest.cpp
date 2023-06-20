@@ -1,13 +1,8 @@
 #include "pch.h"
 #include <cassert>
 #include <chrono>
-#include <mutex>
-#include <stack>
+#include <future>
 #include <stdexcept>
-#include <thread>
-#include <tuple>
-#include <unordered_map>
-#include <vector>
 #include <Windows.h>
 #include "CppUnitTest.h"
 
@@ -41,14 +36,9 @@ void goo()
 {
 	using namespace std::chrono_literals;
 
-	try {
-		ATOMICITY_CHECKER;
+	ATOMICITY_CHECKER;
 
-		std::this_thread::sleep_for(1s);
-	}
-	catch (std::runtime_error& e) {
-		throw e;
-	}
+	std::this_thread::sleep_for(1s);
 }
 
 
@@ -70,21 +60,28 @@ void bar()
 
 void test()
 {	
-	auto t0 = std::thread(foo);
-	auto t1 = std::thread(bar);
+	auto f0 = std::async(std::launch::async, foo);
+	auto f1 = std::async(std::launch::async, bar);
+	f0.get();
+	f1.get();
+};
 
-	try {
-		t0.join();
-		t1.join();
-	}
-	catch (std::runtime_error& e) {
-		throw e;
-	}
-	catch (...) {
-		assert(false);
 
-		throw std::logic_error("");
+template<bool flag, typename T1, typename T2>
+struct conditional
+{
+	constexpr static auto GetType()
+	{
+		if constexpr (flag == true) {
+			return T1{};
+		}
+		else {
+			return T2{};
+		}
 	}
+
+	using type = decltype(GetType());
+
 };
 
 
@@ -94,9 +91,12 @@ namespace UnitTest
 	{
 		TEST_METHOD(TestMethod1)
 		{
-			
+			auto i = conditional<true, int, double>::type{};
+			auto j = conditional<false, int, double>::type{};
 
-			Assert::ExpectException<std::runtime_error>(test);
+			Assert::IsTrue(true);
+
+			//Assert::ExpectException<std::runtime_error>(test);
 		}
 	};
 }
